@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Noble Academy AdaptiveMath - Chrome OS Compatible Learning Platform">
+    <title>Noble AdaptiveMath - Learn at Your Pace</title>
+    
+    <!-- Core Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Firebase SDK -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.8.0/firebase-app-compat.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.8.0/firebase-auth-compat.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.8.0/firebase-firestore-compat.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Replace with your Firebase config from Firebase Console
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "your-project.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project.appspot.com",
+            messagingSenderId: "your-sender-id",
+            appId: "your-app-id"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // Question Bank
+        const QuestionBank = {
+            algebra1: {
+                'Linear Equations': [
+                    {
+                        text: 'Solve for x: 2x + 3 = 11',
+                        answer: '4',
+                        explanation: 'Subtract 3 from both sides, then divide by 2'
+                    },
+                    {
+                        text: 'Solve for x: 3x - 5 = 7',
+                        answer: '4',
+                        explanation: 'Add 5 to both sides, then divide by 3'
+                    }
+                ]
+            }
+        };
+
+        // Available Subjects
+        const SUBJECTS = {
+            ALGEBRA_1: {
+                id: 'algebra1',
+                name: 'Algebra 1',
+                topics: ['Linear Equations', 'Inequalities', 'Quadratic Equations']
+            },
+            GEOMETRY: {
+                id: 'geometry',
+                name: 'Geometry',
+                topics: ['Triangles', 'Circles', 'Polygons']
+            }
+        };
+
+        // Main App Component
+        function App() {
+            const [user, setUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [currentSubject, setCurrentSubject] = useState(null);
+            const [currentTopic, setCurrentTopic] = useState(null);
+            const [currentQuestion, setCurrentQuestion] = useState(null);
+            const [userAnswer, setUserAnswer] = useState('');
+            const [feedback, setFeedback] = useState(null);
+            const [error, setError] = useState(null);
+
+            // Auth state observer
+            useEffect(() => {
+                const unsubscribe = auth.onAuthStateChanged((user) => {
+                    setUser(user);
+                    setLoading(false);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // Noble Schools Google Sign In
+            const handleSignIn = async () => {
+                try {
+                    const provider = new firebase.auth.GoogleAuthProvider();
+                    provider.setCustomParameters({
+                        hd: 'nobleschools.org'  // Restricts to Noble Schools emails
+                    });
+                    await auth.signInWithPopup(provider);
+                } catch (error) {
+                    setError('Please sign in with your Noble Schools email account.');
+                    console.error('Sign in error:', error);
+                }
+            };
+
+            const handleSignOut = async () => {
+                try {
+                    await auth.signOut();
+                    setCurrentSubject(null);
+                    setCurrentTopic(null);
+                    setCurrentQuestion(null);
+                    setUserAnswer('');
+                    setFeedback(null);
+                } catch (error) {
+                    setError('Sign out failed. Please try again.');
+                }
+            };
+
+            const getRandomQuestion = (subject, topic) => {
+                const questions = QuestionBank[subject]?.[topic] || [];
+                return questions[Math.floor(Math.random() * questions.length)];
+            };
+
+            const handleSubjectSelect = (subject) => {
+                setCurrentSubject(subject);
+                setCurrentTopic(null);
+                setCurrentQuestion(null);
+                setUserAnswer('');
+                setFeedback(null);
+            };
+
+            const handleTopicSelect = async (topic) => {
+                setCurrentTopic(topic);
+                const newQuestion = getRandomQuestion(currentSubject.id, topic);
+                setCurrentQuestion(newQuestion);
+                setUserAnswer('');
+                setFeedback(null);
+
+                try {
+                    await db.collection('user_progress').doc(user.uid).collection('topics').add({
+                        subject: currentSubject.id,
+                        topic: topic,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                } catch (error) {
+                    console.error('Error recording topic selection:', error);
+                }
+            };
+
+            const handleAnswerSubmit = async () => {
+                if (currentQuestion && userAnswer) {
+                    const isCorrect = userAnswer.trim() === currentQuestion.answer;
+                    setFeedback({
+                        correct: isCorrect,
+                        message: isCorrect ? 'Correct!' : `Incorrect. ${currentQuestion.explanation}`
+                    });
+
+                    try {
+                        await db.collection('user_progress').doc(user.uid).collection('answers').add({
+                            subject: currentSubject.id,
+                            topic: currentTopic,
+                            question: currentQuestion.text,
+                            answer: userAnswer,
+                            correct: isCorrect,
+                            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    } catch (error) {
+                        console.error('Error recording answer:', error);
+                    }
+                }
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+                        <div className="text-xl">Loading...</div>
+                    </div>
+                );
+            }
+
+            if (!user) {
+                return (
+                    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+                        <div className="bg-white p-8 rounded-lg shadow-md">
+                            <h1 className="text-2xl font-bold mb-4">Noble AdaptiveMath</h1>
+                            {error && (
+                                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
+                                    {error}
+                                </div>
+                            )}
+                            <button
+                                onClick={handleSignIn}
+                                className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                            >
+                                Sign In with Noble Schools Account
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-100 p-8">
+                    <div className="flex justify-between items-center mb-8">
+                        <h1 className="text-2xl font-bold">
+                            Welcome, {user.displayName || 'Student'}
+                        </h1>
+                        <button
+                            onClick={handleSignOut}
+                            className="text-red-500 hover:text-red-600"
+                        >
+                            Sign Out
+                        </button>
+                    </div>
+
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
+                            {error}
+                        </div>
+                    )}
+
+                    {!currentSubject ? (
+                        <div>
+                            <h2 className="text-xl mb-4">Select a Subject:</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {Object.values(SUBJECTS).map((subject) => (
+                                    <button
+                                        key={subject.id}
+                                        onClick={() => handleSubjectSelect(subject)}
+                                        className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow"
+                                    >
+                                        <h3 className="text-lg font-semibold">{subject.name}</h3>
+                                        <p className="text-gray-600">{subject.topics.length} topics</p>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ) : !currentTopic ? (
+                        <div>
+                            <button
+                                onClick={() => setCurrentSubject(null)}
+                                className="text-blue-500 hover:text-blue-600 mb-4"
+                            >
+                                ← Back to Subjects
+                            </button>
+                            <h2 className="text-xl mb-4">Select a Topic in {currentSubject.name}:</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {currentSubject.topics.map((topic) => (
+                                    <button
+                                        key={topic}
+                                        onClick={() => handleTopicSelect(topic)}
+                                        className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow"
+                                    >
+                                        {topic}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        <div>
+                            <button
+                                onClick={() => setCurrentTopic(null)}
+                                className="text-blue-500 hover:text-blue-600 mb-4"
+                            >
+                                ← Back to Topics
+                            </button>
+                            {currentQuestion && (
+                                <div className="bg-white p-6 rounded-lg shadow-md">
+                                    <h2 className="text-xl mb-4">{currentQuestion.text}</h2>
+                                    <input
+                                        type="text"
+                                        value={userAnswer}
+                                        onChange={(e) => setUserAnswer(e.target.value)}
+                                        className="border p-2 rounded w-full mb-4"
+                                        placeholder="Enter your answer"
+                                    />
+                                    <button
+                                        onClick={handleAnswerSubmit}
+                                        className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                                    >
+                                        Submit Answer
+                                    </button>
+                                    {feedback && (
+                                        <div className={`mt-4 p-4 rounded ${feedback.correct ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                            {feedback.message}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Render the app
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
